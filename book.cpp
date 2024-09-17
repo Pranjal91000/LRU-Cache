@@ -6,6 +6,7 @@
 #include <string>
 #include <chrono>
 #include <thread>
+#include <vector>
 
 // Structure to hold book information
 struct Book {
@@ -53,6 +54,13 @@ public:
         cacheMap[id] = {book, cache.begin()};
     }
 
+    void remove(int id) {
+        if (cacheMap.find(id) != cacheMap.end()) {
+            cache.erase(cacheMap[id].second);
+            cacheMap.erase(id);
+        }
+    }
+
     // Display cache for debugging
     void displayCache() {
         std::cout << "Cache content (Book IDs): ";
@@ -83,6 +91,7 @@ void refreshCache(LRUCache &cache, std::unordered_map<int, int> &frequencyMap, i
             // Remove the least frequently used item from the cache
             std::cout << "Refreshing cache: Removing least frequently used book ID " << minFreqID << std::endl;
             frequencyMap.erase(minFreqID);
+            cache.remove(minFreqID);
         }
     }
 }
@@ -110,12 +119,72 @@ std::unordered_map<int, Book> loadBooksFromCSV(const std::string &filename) {
     return bookData;
 }
 
+// Function to write books to CSV
+void writeBooksToCSV(const std::string &filename, const std::unordered_map<int, Book> &bookData) {
+    std::ofstream file(filename);
+    file << "ID,Title,Author,ISBN,Year\n";
+    for (const auto &pair : bookData) {
+        const Book &book = pair.second;
+        file << book.id << "," << book.title << "," << book.author << "," << book.isbn << "," << book.year << "\n";
+    }
+}
+
+// Function to add a book to the library
+void addBook(std::unordered_map<int, Book> &bookData, const std::string &filename, LRUCache &cache) {
+    int id;
+    std::string title, author, isbn;
+    int year;
+    
+    std::cout << "Enter book ID: ";
+    std::cin >> id;
+    std::cin.ignore();
+    std::cout << "Enter book title: ";
+    getline(std::cin, title);
+    std::cout << "Enter book author: ";
+    getline(std::cin, author);
+    std::cout << "Enter book ISBN: ";
+    getline(std::cin, isbn);
+    std::cout << "Enter book year: ";
+    std::cin >> year;
+
+    Book newBook = {id, title, author, isbn, year};
+    bookData[id] = newBook;
+
+    // Add to cache
+    cache.put(id, newBook);
+
+    // Write to CSV
+    writeBooksToCSV(filename, bookData);
+    std::cout << "Book added successfully." << std::endl;
+}
+
+// Function to remove a book from the library
+void removeBook(std::unordered_map<int, Book> &bookData, const std::string &filename, LRUCache &cache, std::unordered_map<int, int> &frequencyMap) {
+    int id;
+    std::cout << "Enter book ID to remove: ";
+    std::cin >> id;
+
+    if (bookData.find(id) != bookData.end()) {
+        // Remove from data and cache
+        bookData.erase(id);
+        cache.remove(id);
+        frequencyMap.erase(id);
+
+        // Write to CSV
+        writeBooksToCSV(filename, bookData);
+        std::cout << "Book removed successfully." << std::endl;
+    } else {
+        std::cout << "Book ID not found." << std::endl;
+    }
+}
+
 int main() {
     const int cacheCapacity = 3; // Capacity of the cache
     const int refreshDuration = 10; // Time duration for cache refresh (in seconds)
+    const std::string filename = "books.csv";
 
     // Load books from CSV file
-    std::unordered_map<int, Book> bookData = loadBooksFromCSV("books.csv");
+    std::unordered_map<int, Book> bookData = loadBooksFromCSV(filename);
 
     // Initialize cache and frequency map
     LRUCache cache(cacheCapacity);
@@ -124,29 +193,52 @@ int main() {
     // Start the LFU refresh thread
     std::thread refreshThread(refreshCache, std::ref(cache), std::ref(frequencyMap), refreshDuration);
 
+    int choice;
     while (true) {
-        int id;
-        std::cout << "Enter book ID to look up (or -1 to exit): ";
-        std::cin >> id;
+        std::cout << "\nLibrary Menu:\n";
+        std::cout << "1. Look up book\n";
+        std::cout << "2. Add book\n";
+        std::cout << "3. Remove book\n";
+        std::cout << "4. Exit\n";
+        std::cout << "Enter your choice: ";
+        std::cin >> choice;
 
-        if (id == -1) break;
+        if (choice == 4) break;
 
-        Book *book = cache.get(id);
-        if (book) {
-            std::cout << "Book found in cache: " << book->title << " by " << book->author << std::endl;
-            frequencyMap[id]++;
-        } else {
-            std::cout << "Book not in cache. Fetching from file..." << std::endl;
-            if (bookData.find(id) != bookData.end()) {
-                cache.put(id, bookData[id]);
-                frequencyMap[id] = 1;
-                std::cout << "Book: " << bookData[id].title << " by " << bookData[id].author << " added to cache." << std::endl;
-            } else {
-                std::cout << "Book ID not found in library." << std::endl;
+        switch (choice) {
+            case 1: {
+                int id;
+                std::cout << "Enter book ID to look up: ";
+                std::cin >> id;
+
+                Book *book = cache.get(id);
+                if (book) {
+                    std::cout << "Book found in cache: " << book->title << " by " << book->author << std::endl;
+                    frequencyMap[id]++;
+                } else {
+                    std::cout << "Book not in cache. Fetching from file..." << std::endl;
+                    if (bookData.find(id) != bookData.end()) {
+                        cache.put(id, bookData[id]);
+                        frequencyMap[id] = 1;
+                        std::cout << "Book: " << bookData[id].title << " by " << bookData[id].author << " added to cache." << std::endl;
+                    } else {
+                        std::cout << "Book ID not found in library." << std::endl;
+                    }
+                }
+
+                cache.displayCache();
+                break;
             }
+            case 2:
+                addBook(bookData, filename, cache);
+                break;
+            case 3:
+                removeBook(bookData, filename, cache, frequencyMap);
+                break;
+            default:
+                std::cout << "Invalid choice." << std::endl;
+                break;
         }
-
-        cache.displayCache(); // Display current cache content for debugging
     }
 
     // Join the refresh thread before exiting
